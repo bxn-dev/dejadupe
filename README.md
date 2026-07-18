@@ -29,11 +29,15 @@ dejadupe
 # Scan another directory
 dejadupe /path/to/files
 
-# Preview duplicate deletion
+# Preview deletion; keeps the newest copy by default
 dejadupe delete /path/to/files
 
-# Delete duplicates, keeping the newest copy
+# Preview deletion while keeping the oldest copy
+dejadupe delete /path/to/files --keep-oldest
+
+# Apply either strategy
 dejadupe delete /path/to/files --execute
+dejadupe delete /path/to/files --keep-oldest --execute
 
 # Copy only contents not already present at the destination
 dejadupe copy /path/to/source /path/to/destination

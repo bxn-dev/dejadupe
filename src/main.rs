@@ -16,10 +16,13 @@ struct Cli {
 
 #[derive(Subcommand)]
 enum Commands {
-    /// Deletes duplicates while retaining the newest copy.
+    /// Deletes duplicates while retaining one copy.
     Delete {
         /// Directory to scan; defaults to the current directory.
         path: Option<PathBuf>,
+        /// Keeps the oldest copy instead of the newest.
+        #[arg(long)]
+        keep_oldest: bool,
         /// Performs deletion; without this flag, only shows planned changes.
         #[arg(long)]
         execute: bool,
@@ -58,19 +61,18 @@ fn scan(path: &Path) -> Result<()> {
     Ok(())
 }
 
-fn keeper_index(files: &[dejadupe::FileInfo]) -> Option<usize> {
+fn keeper_index(files: &[dejadupe::FileInfo], keep_oldest: bool) -> Option<usize> {
     files
         .iter()
         .enumerate()
-        .max_by(|(_, left), (_, right)| {
-            left.modified
-                .cmp(&right.modified)
-                .then_with(|| right.path.cmp(&left.path))
+        .min_by(|(_, left), (_, right)| {
+            let age = left.modified.cmp(&right.modified);
+            (if keep_oldest { age } else { age.reverse() }).then_with(|| left.path.cmp(&right.path))
         })
         .map(|(index, _)| index)
 }
 
-fn delete_duplicates(path: &Path, execute: bool) -> Result<()> {
+fn delete_duplicates(path: &Path, execute: bool, keep_oldest: bool) -> Result<()> {
     let groups =
         dejadupe::scan(path).with_context(|| format!("failed to scan {}", path.display()))?;
     let delete_count: usize = groups.iter().map(|group| group.files.len() - 1).sum();
@@ -88,7 +90,8 @@ fn delete_duplicates(path: &Path, execute: bool) -> Result<()> {
     let mut reclaimed = 0_u64;
 
     for group in &groups {
-        let keeper = keeper_index(&group.files).context("duplicate group contains no files")?;
+        let keeper =
+            keeper_index(&group.files, keep_oldest).context("duplicate group contains no files")?;
         if !execute {
             println!("Keep: {}", group.files[keeper].path.display());
         }
@@ -137,9 +140,15 @@ fn copy_unique(source: &Path, destination: &Path) -> Result<()> {
 
 fn run(cli: &Cli) -> Result<()> {
     match &cli.command {
-        Some(Commands::Delete { path, execute }) => {
-            delete_duplicates(path.as_deref().unwrap_or_else(|| Path::new(".")), *execute)
-        }
+        Some(Commands::Delete {
+            path,
+            keep_oldest,
+            execute,
+        }) => delete_duplicates(
+            path.as_deref().unwrap_or_else(|| Path::new(".")),
+            *execute,
+            *keep_oldest,
+        ),
         Some(Commands::Copy {
             source,
             destination,
@@ -159,7 +168,7 @@ mod tests {
     use super::keeper_index;
 
     #[test]
-    fn keeps_newest_file() {
+    fn selects_keeper_by_age() {
         let files = [
             dejadupe::FileInfo {
                 path: "old".into(),
@@ -173,7 +182,8 @@ mod tests {
             },
         ];
 
-        assert_eq!(keeper_index(&files), Some(1));
+        assert_eq!(keeper_index(&files, false), Some(1));
+        assert_eq!(keeper_index(&files, true), Some(0));
     }
 }
 
